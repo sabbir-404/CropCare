@@ -1,21 +1,13 @@
+// src/lib/api.js
 import axios from "axios";
+import { API_BASE } from "./config";
 
-// Dev uses Vite proxy → '/api'. Prod can set VITE_API_URL='https://api.yourdomain.com/api'
-const baseURL = import.meta.env.VITE_API_URL || "/api";
+export const api = axios.create({ baseURL: API_BASE });
 
-export const api = axios.create({ baseURL });
+export const getMe = () => api.get("/me/").then(r => r.data);
+export const updateMeProfile = (payload) =>
+  api.post("/me/update/", payload).then(r => r.data);
 
-// --- endpoints ---
-export const ping            = () => api.get("/ping/");
-export const getTips         = () => api.get("/tips/");
-export const getWeather      = () => api.get("/weather/");
-export const getAir          = () => api.get("/air/");
-export const listDetections  = () => api.get("/detections/");
-
-export const inferImage = (file) => {
-  const form = new FormData();
-  form.append("image", file);
-  return api.post("/infer/", form, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
-};
+export const getTips = () => api.get("/tips/").then(r => r.data);
+export const listDetections = (params={}) =>
+  api.get("/detections/", { params }).then(r => r.data);

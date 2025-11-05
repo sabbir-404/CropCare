@@ -1,13 +1,5 @@
 from django.urls import path
-
-from .views import (
-    ping,
-    InferView,
-    tips,
-    detections,
-    weather,
-    air,
-)
+from .views import ping, InferView, tips, detections, weather, air
 
 urlpatterns = [
     path("ping/", ping),
