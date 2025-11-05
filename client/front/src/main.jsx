@@ -7,7 +7,6 @@ import AnimatedRoutes from "./app/AnimatedRoutes";
 import "./index.css";
 import "leaflet/dist/leaflet.css";
 
-
 const root = document.getElementById("root");
 if (!root) throw new Error("Root element not found");
 

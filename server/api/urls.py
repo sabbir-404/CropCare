@@ -1,9 +1,19 @@
 from django.urls import path
-from . import views
+
+from .views import (
+    ping,
+    InferView,
+    tips,
+    detections,
+    weather,
+    air,
+)
 
 urlpatterns = [
-    # temporary test route 
-    path('', views.hello, name='hello'),
-    path('test/', views.thelo, name='hello'),
-    
+    path("ping/", ping),
+    path("infer/", InferView.as_view()),
+    path("tips/", tips),
+    path("detections/", detections),
+    path("weather/", weather),
+    path("air/", air),
 ]
