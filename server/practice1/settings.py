@@ -1,8 +1,9 @@
 """
-Django settings for practice1 project (dev).
+Django settings for practice1 project (development-ready).
 """
 
 from pathlib import Path
+import environ
 
 # ---------------------------------------
 # PATHS
@@ -10,11 +11,18 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ---------------------------------------
-# CORE FLAGS (DEV)
+# ENVIRONMENT (.env support)
 # ---------------------------------------
-DEBUG = True
-SECRET_KEY = "django-insecure-da@nrhgs8s)xxr^cub=n40t*=6-7$o&82&8oc1mfh_a)cm!!=j"  # dev only
-ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+env = environ.Env()
+# Load environment variables from .env (optional; safe if missing)
+environ.Env.read_env(BASE_DIR / ".env")
+
+# ---------------------------------------
+# CORE FLAGS
+# ---------------------------------------
+DEBUG = env.bool("DJANGO_DEBUG", default=True)
+SECRET_KEY = env.str("DJANGO_SECRET_KEY", default="dev-unsafe-secret-key")
+ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["127.0.0.1", "localhost"])
 
 # ---------------------------------------
 # APPS
@@ -31,7 +39,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "rest_framework",
 
-    # local
+    # local apps
     "api",
 ]
 
@@ -39,7 +47,7 @@ INSTALLED_APPS = [
 # MIDDLEWARE
 # ---------------------------------------
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",  # keep high (before CommonMiddleware)
+    "corsheaders.middleware.CorsMiddleware",  # must be before CommonMiddleware
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -72,7 +80,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "practice1.wsgi.application"
 
 # ---------------------------------------
-# DATABASE (SQLite for dev)
+# DATABASE (SQLite)
 # ---------------------------------------
 DATABASES = {
     "default": {
@@ -82,7 +90,7 @@ DATABASES = {
 }
 
 # ---------------------------------------
-# AUTH / PASSWORD VALIDATORS
+# PASSWORD VALIDATION
 # ---------------------------------------
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -92,10 +100,10 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 # ---------------------------------------
-# I18N / TZ
+# INTERNATIONALIZATION
 # ---------------------------------------
 LANGUAGE_CODE = "en-us"
-TIME_ZONE = "Asia/Dhaka"   # <- use local time
+TIME_ZONE = "Asia/Dhaka"  # local timezone
 USE_I18N = True
 USE_TZ = True
 
@@ -103,11 +111,13 @@ USE_TZ = True
 # STATIC / MEDIA
 # ---------------------------------------
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 # ---------------------------------------
-# REST FRAMEWORK (minimal JSON)
+# REST FRAMEWORK CONFIG
 # ---------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
@@ -116,14 +126,14 @@ REST_FRAMEWORK = {
 }
 
 # ---------------------------------------
-# CORS / CSRF (Vite dev @5173)
+# CORS / CSRF (for frontend at :5173)
 # ---------------------------------------
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
-CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
-CORS_ALLOW_CREDENTIALS = False  # set True only if you use cookie-based auth
+CORS_ALLOWED_ORIGINS = env.list(
+    "CORS_ALLOWED_ORIGINS",
+    default=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+)
+CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS
+CORS_ALLOW_CREDENTIALS = False  # enable True only if using cookies/session auth
