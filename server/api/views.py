@@ -1,244 +1,102 @@
-from datetime import datetime, timedelta
-import random
-from pathlib import Path
-
-from django.conf import settings
-from django.core.files.storage import default_storage
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-
-from rest_framework.views import APIView
+from rest_framework.decorators import api_view, parser_classes, permission_classes
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, permissions
+from django.contrib.auth import get_user_model
+from .models import Detection, UserProfile
+from .serializers import DetectionSerializer, UserProfileSerializer
 
-# -------------------------
-# Simple helpers
-# -------------------------
-def _now_iso():
-    return datetime.utcnow().isoformat() + "Z"
+User = get_user_model()
 
-def _rand_latlon():
-    # Somewhere around Dhaka
-    lat = 23.7 + random.uniform(-0.3, 0.3)
-    lon = 90.4 + random.uniform(-0.3, 0.3)
-    return round(lat, 6), round(lon, 6)
-
-# In-memory "DB" for demo; replace with real models later
-DETECTIONS = []
-
-# -------------------------
-# /api/ping
-# -------------------------
+@api_view(["GET"])
 def ping(request):
-    return JsonResponse({"ok": True, "time": _now_iso()})
+    return Response({"ok": True})
 
-# -------------------------
-# /api/infer (multipart/form-data)
-# fields: image, crop_type, crop_stage, [lat, lon, acc]
-# -------------------------
-class InferView(APIView):
-    def post(self, request):
-        # Validate
-        img = request.FILES.get("image")
-        if not img:
-            return Response({"detail": "image is required"}, status=status.HTTP_400_BAD_REQUEST)
-
-        crop_type = request.data.get("crop_type") or ""
-        crop_stage = request.data.get("crop_stage") or ""
-        lat = request.data.get("lat")
-        lon = request.data.get("lon")
-        acc = request.data.get("acc")
-
-        # Save the uploaded file to MEDIA_ROOT
-        media_root = Path(settings.MEDIA_ROOT)
-        media_root.mkdir(parents=True, exist_ok=True)
-        saved_path = default_storage.save(f"uploads/{datetime.utcnow().timestamp()}_{img.name}", img)
-        image_url = settings.MEDIA_URL + saved_path
-
-        # Fake "model" output
-        label = random.choice(["Leaf Blight", "Leaf Spot", "Brown Rust", "Healthy"])
-        conf = random.uniform(0.55, 0.98)
-        severity = random.choices(["low", "medium", "high"], weights=[3, 4, 2])[0]
-
-        # Optional fake heatmap
-        heatmap_url = None  # You can host a placeholder or generate one later
-
-        tips = [
-            "Remove severely infected leaves to reduce spread.",
-            "Avoid overhead irrigation late in the day.",
-            "Apply a recommended fungicide if symptoms worsen.",
-            "Ensure good air flow between plants.",
-        ]
-
-        item = {
-            "id": len(DETECTIONS) + 1,
-            "label": label,
-            "confidence": round(conf, 3),
-            "severity": severity,
-            "crop_type": crop_type,
-            "crop_stage": crop_stage,
-            "image_url": image_url,
-            "heatmap_url": heatmap_url,
-            "tips": tips[: random.randint(2, 4)],
-            "captured_at": _now_iso(),
-        }
-        if lat and lon:
-            try:
-                item["lat"] = float(lat)
-                item["lon"] = float(lon)
-                if acc:
-                    item["acc"] = float(acc)
-            except ValueError:
-                pass
-
-        # Persist to memory for history
-        DETECTIONS.append(item)
-
-        return Response(item, status=200)
-
-# -------------------------
-# /api/tips
-# -------------------------
-def tips(request):
-    out = {
-        "tips": [
-            "Scout your field after rainfall for early symptoms.",
-            "Disinfect tools when moving between fields.",
-            "Use resistant varieties when available.",
-            "Maintain proper plant spacing to reduce humidity.",
-        ]
-    }
-    return JsonResponse(out)
-
-# -------------------------
-# /api/detections?limit=&offset=
-# -------------------------
+# -------- Detections (list/create) --------
+@api_view(["GET", "POST"])
+@parser_classes([MultiPartParser, FormParser])
+@permission_classes([permissions.AllowAny])  # loosen for dev; tighten later
 def detections(request):
-    try:
-        limit = int(request.GET.get("limit", "100"))
-        offset = int(request.GET.get("offset", "0"))
-    except ValueError:
-        limit, offset = 100, 0
+    if request.method == "GET":
+        qs = Detection.objects.all()[:500]
+        return Response(DetectionSerializer(qs, many=True).data)
 
-    data = DETECTIONS[offset : offset + limit]
-    return JsonResponse(data, safe=False)
+    # POST (multipart/form-data)
+    photo = request.FILES.get("photo")
+    label = request.data.get("label", "unknown")
+    confidence = float(request.data.get("confidence", 0))
+    severity_band = request.data.get("severity_band", "low")
+    lat = request.data.get("lat")
+    lon = request.data.get("lon")
+    advice = request.data.get("advice", "")
 
-# -------------------------
-# /api/alerts
-# Returns a LIST of regional alerts (not an object)
-# Each item has: region, center{lat,lon}, severity, top_disease, tips[], summary, [radius_m|polygon]
-# -------------------------
+    item = Detection.objects.create(
+        user=request.user if request.user.is_authenticated else None,
+        photo=photo,
+        label=label,
+        confidence=confidence,
+        severity_band=severity_band,
+        lat=lat or None,
+        lon=lon or None,
+        advice=advice,
+    )
+    return Response(DetectionSerializer(item).data, status=status.HTTP_201_CREATED)
+
+# -------- Tips (simple: derive from last detection) --------
+@api_view(["GET"])
+def tips(request):
+    last = Detection.objects.first()
+    tips = []
+    if last:
+        if last.severity_band == "high":
+            tips += ["Isolate affected leaves", "Apply recommended fungicide", "Improve airflow"]
+        elif last.severity_band == "medium":
+            tips += ["Increase monitoring frequency", "Use organic copper-based spray"]
+        else:
+            tips += ["Maintain spacing", "Avoid overhead watering in evenings"]
+    return Response({"tips": tips})
+
+# -------- Weather / Air passthrough (your existing function logic can stay) --------
+@api_view(["GET"])
+def weather(request):
+    # placeholder: return minimal structure the FE expects
+    return Response({"temp_c": 30.0, "humidity": 70, "wind_ms": 2.0, "uv_index": 5.0, "rain_mm": 0})
+
+@api_view(["GET"])
+def air(request):
+    return Response({"aqi": 75, "category": "Moderate", "pm25": 35, "pm10": 40, "o3": 20})
+
+# -------- Regional Alerts (keep or replace with your data) --------
+@api_view(["GET"])
 def alerts(request):
-    regions = [
+    # FE expects an array. You can replace with DB-backed data later.
+    data = [
         {
             "region": "Gazipur",
             "center": {"lat": 23.999, "lon": 90.420},
-            "severity": "medium",
             "top_disease": "Leaf Blight",
-            "radius_m": 6000,
-            "tips": [
-                "Rotate crops to break disease cycles.",
-                "Spray at dusk to reduce leaf burn risk.",
-            ],
-            "summary": "Several cases reported after a wet week; monitor seedlings closely.",
-        },
-        {
-            "region": "Narayanganj",
-            "center": {"lat": 23.620, "lon": 90.510},
-            "severity": "high",
-            "top_disease": "Brown Rust",
-            "polygon": [
-                [23.63, 90.49], [23.64, 90.55], [23.60, 90.57], [23.58, 90.50],
-            ],
-            "tips": [
-                "Remove volunteer plants acting as hosts.",
-                "Consider a protective fungicide if symptoms spread fast.",
-            ],
-            "summary": "High humidity and warmth have driven localized outbreaks.",
-        },
-        {
-            "region": "Tangail",
-            "center": {"lat": 24.251, "lon": 89.916},
-            "severity": "low",
-            "top_disease": "Leaf Spot",
-            "radius_m": 8000,
-            "tips": [
-                "Ensure field sanitation.",
-                "Avoid overhead watering during late evening.",
-            ],
-            "summary": "Only sporadic reports; keep regular scouting.",
-        },
+            "severity": "medium",
+            "summary": "Humidity elevated; sporadic infections likely.",
+            "tips": ["Scout every 2 days", "Remove heavily infected leaves"],
+            "radius_m": 4000,
+        }
     ]
-    return JsonResponse(regions, safe=False)
+    return Response(data)
 
-# -------------------------
-# /api/weather?lat=&lon=
-# Returns minimal weather context to drive risk notes
-# -------------------------
-def weather(request):
-    # If lat/lon missing, just return a default "near Dhaka"
-    try:
-        lat = float(request.GET.get("lat", "23.78"))
-        lon = float(request.GET.get("lon", "90.41"))
-    except ValueError:
-        lat, lon = 23.78, 90.41
-
-    # Static-but-realistic sample values; plug in real API later
-    out = {
-        "lat": lat,
-        "lon": lon,
-        "temp_c": round(random.uniform(24, 36), 1),
-        "humidity": random.randint(55, 95),
-        "wind_ms": round(random.uniform(0.5, 6.5), 1),
-        "uv_index": round(random.uniform(3, 11), 1),
-        "rain_mm": random.choice([0, 0, 2, 5, 12]),
-        "time": _now_iso(),
-    }
-    return JsonResponse(out)
-
-# -------------------------
-# /api/air?lat=&lon=
-# -------------------------
-def air(request):
-    try:
-        lat = float(request.GET.get("lat", "23.78"))
-        lon = float(request.GET.get("lon", "90.41"))
-    except ValueError:
-        lat, lon = 23.78, 90.41
-
-    aqi = random.randint(35, 160)
-    category = (
-        "Good" if aqi < 50 else
-        "Moderate" if aqi < 100 else
-        "Unhealthy for Sensitive Groups"
-    )
-    out = {
-        "lat": lat,
-        "lon": lon,
-        "aqi": aqi,
-        "category": category,
-        "pm25": round(random.uniform(8, 75), 1),
-        "pm10": round(random.uniform(12, 110), 1),
-        "o3": round(random.uniform(10, 70), 1),
-        "time": _now_iso(),
-    }
-    return JsonResponse(out)
-
-# -------------------------
-# /api/me  (simple demo profile)
-# GET -> return a simple profile
-# POST (multipart) -> update name/avatar (store file)
-# -------------------------
-@csrf_exempt
+# -------- Me (profile) --------
+@api_view(["GET"])
+@permission_classes([permissions.AllowAny])
 def me(request):
-    if request.method == "POST":
-        name = request.POST.get("name", "Farmer")
-        avatar = request.FILES.get("avatar")
-        avatar_url = ""
-        if avatar:
-            saved_path = default_storage.save(f"avatars/{datetime.utcnow().timestamp()}_{avatar.name}", avatar)
-            avatar_url = settings.MEDIA_URL + saved_path
-        return JsonResponse({"name": name, "avatar_url": avatar_url})
+    # dev-only: return anonymous profile placeholder
+    prof, _ = UserProfile.objects.get_or_create(user=request.user) if request.user.is_authenticated else (None, False)
+    data = {"name": prof.name if prof else "Guest", "avatar_url": prof.avatar.url if (prof and prof.avatar) else ""}
+    return Response(data)
 
-    # GET
-    return JsonResponse({"name": "Farmer", "avatar_url": ""})
+@api_view(["POST"])
+@parser_classes([MultiPartParser, FormParser])
+def update_profile(request):
+    prof, _ = UserProfile.objects.get_or_create(user=request.user)
+    ser = UserProfileSerializer(prof, data=request.data, partial=True)
+    ser.is_valid(raise_exception=True)
+    ser.save()
+    return Response(ser.data)
