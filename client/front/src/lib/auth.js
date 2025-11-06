@@ -1,11 +1,16 @@
-const KEY = "cropcare_token";
+// Minimal token storage for "protected" routes; swap to real auth later.
+const KEY = "cc_token";
 
-export function isAuthed() {
-  return Boolean(localStorage.getItem(KEY));
+export function setToken(t) {
+  localStorage.setItem(KEY, t);
 }
 
-export function setToken(token) {
-  localStorage.setItem(KEY, token);
+export function getToken() {
+  return localStorage.getItem(KEY) || "";
+}
+
+export function isAuthed() {
+  return Boolean(getToken());
 }
 
 export function clearToken() {

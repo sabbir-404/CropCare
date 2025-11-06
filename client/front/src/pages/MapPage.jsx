@@ -4,12 +4,8 @@ import Nav from "../components/Layout/Nav";
 import Container from "../components/Layout/Container";
 import { MapContainer, TileLayer, Circle, Polygon, Popup, useMap, Marker } from "react-leaflet";
 import { useQuery } from "@tanstack/react-query";
-// import { USE_MOCK } from "../lib/api";
-// import { getRegionalAlerts, getWeather, getAirQuality } from "../lib/api";
-import { mockRegionalAlerts, mockGetWeather, mockGetAirQuality } from "../lib/mock";
-import { riskFromWeather } from "../lib/risk";
+import { getRegionalAlerts, getWeather, getAirQuality } from "../lib/api";
 
-// fix Leaflet default icon in bundlers (use public/leaflet/ assets or CDN)
 const UserIcon = L.divIcon({
   className: "bg-blue-600 rounded-full ring-2 ring-white",
   html: '<div style="width:12px;height:12px;border-radius:9999px;background:#2563eb"></div>',
@@ -34,16 +30,12 @@ const sevColor = {
 };
 
 export default function MapPage() {
-  // regional overlays
   const { data: alerts = [] } = useQuery({
     queryKey: ["alerts"],
-    queryFn: () => (USE_MOCK ? mockRegionalAlerts() : getRegionalAlerts()),
+    queryFn: () => getRegionalAlerts(),
   });
 
-  // selected region from overlays
   const [selected, setSelected] = useState(null);
-
-  // user geolocation
   const [myLoc, setMyLoc] = useState(null);
   const [geoErr, setGeoErr] = useState("");
 
@@ -55,7 +47,7 @@ export default function MapPage() {
     setGeoErr("");
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setSelected(null); // show personal conditions instead of a region
+        setSelected(null);
         setMyLoc({ lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy });
       },
       (err) => setGeoErr(err.message || "Failed to get location."),
@@ -63,35 +55,30 @@ export default function MapPage() {
     );
   }
 
-  // target coords for conditions panel: selected region OR my location
   const condTarget = selected?.center ?? myLoc ?? null;
 
-  // fetch weather + aqi for condTarget
   const { data: weather } = useQuery({
     queryKey: ["weather", condTarget?.lat, condTarget?.lon],
     enabled: Boolean(condTarget),
-    queryFn: () =>
-      condTarget
-        ? USE_MOCK
-          ? mockGetWeather(condTarget.lat, condTarget.lon)
-          : getWeather(condTarget.lat, condTarget.lon)
-        : Promise.resolve(undefined),
+    queryFn: () => getWeather(condTarget.lat, condTarget.lon),
   });
 
   const { data: aqi } = useQuery({
     queryKey: ["aqi", condTarget?.lat, condTarget?.lon],
     enabled: Boolean(condTarget),
-    queryFn: () =>
-      condTarget
-        ? USE_MOCK
-          ? mockGetAirQuality(condTarget.lat, condTarget.lon)
-          : getAirQuality(condTarget.lat, condTarget.lon)
-        : Promise.resolve(undefined),
+    queryFn: () => getAirQuality(condTarget.lat, condTarget.lon),
   });
 
-  const risk = useMemo(() => (weather ? riskFromWeather(weather) : undefined), [weather]);
+  const risk = useMemo(() => {
+    if (!weather) return null;
+    const notes = [];
+    let level = "low";
+    if (weather.humidity >= 80) { notes.push("High humidity can promote fungal diseases."); level = "medium"; }
+    if ((weather.rain_mm || 0) > 5) { notes.push("Recent rain increases leaf wetness duration."); level = "medium"; }
+    if (weather.temp_c >= 34 && weather.humidity >= 70) { notes.push("Hot & humid — disease pressure may be elevated."); level = "high"; }
+    return { level, notes };
+  }, [weather]);
 
-  // initial center
   const mapCenter =
     selected?.center ??
     myLoc ??
@@ -115,7 +102,6 @@ export default function MapPage() {
         </div>
 
         <div className="grid lg:grid-cols-3 gap-6">
-          {/* Map */}
           <div className="lg:col-span-2 rounded-2xl border shadow-sm bg-[#F1EDE8]">
             <div className={`rounded-2xl overflow-hidden ${mapH}`}>
               <MapContainer center={[mapCenter.lat, mapCenter.lon]} zoom={10} className="h-full w-full">
@@ -124,11 +110,8 @@ export default function MapPage() {
                   attribution="&copy; OpenStreetMap"
                 />
 
-                {(selected || myLoc) && (
-                  <FitTo center={selected?.center ?? myLoc} />
-                )}
+                {(selected || myLoc) && <FitTo center={selected?.center ?? myLoc} />}
 
-                {/* Current user location */}
                 {myLoc && (
                   <>
                     <Marker position={[myLoc.lat, myLoc.lon]} icon={UserIcon}>
@@ -142,14 +125,13 @@ export default function MapPage() {
                     {typeof myLoc.acc === "number" && myLoc.acc > 0 && (
                       <Circle
                         center={[myLoc.lat, myLoc.lon]}
-                        radius={Math.min(myLoc.acc, 150)} // cap display radius
+                        radius={Math.min(myLoc.acc, 150)}
                         pathOptions={{ color: "#2563eb88", fillColor: "#2563eb55", fillOpacity: 0.25 }}
                       />
                     )}
                   </>
                 )}
 
-                {/* Alert overlays */}
                 {alerts.map((a, i) =>
                   a.polygon ? (
                     <Polygon
@@ -182,7 +164,6 @@ export default function MapPage() {
             </div>
           </div>
 
-          {/* Right panel */}
           <div className="rounded-2xl border shadow-sm p-4 bg-[#F1EDE8]">
             <div className="flex items-center justify-between mb-2">
               <div className="font-semibold">Details</div>
@@ -192,7 +173,7 @@ export default function MapPage() {
                 onChange={(e) => {
                   const r = alerts.find(a => a.region === e.target.value) || null;
                   setSelected(r);
-                  if (r) setMyLoc(null); // switch context to region
+                  if (r) setMyLoc(null);
                 }}
               >
                 <option value="">(choose region)</option>
@@ -202,7 +183,6 @@ export default function MapPage() {
 
             {geoErr && <div className="text-xs text-rose-600 mb-2">{geoErr}</div>}
 
-            {/* Region info / tips */}
             {selected && (
               <>
                 <div className="rounded-lg border p-3 bg-white/70">
@@ -222,7 +202,6 @@ export default function MapPage() {
               </>
             )}
 
-            {/* Live conditions (for selected region OR my location) */}
             <div className="mt-4">
               <div className="font-semibold">Current conditions</div>
               {!condTarget && <div className="text-sm text-gray-600">Select a region or click “Use my location”.</div>}
